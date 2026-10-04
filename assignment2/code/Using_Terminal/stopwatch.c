@@ -7,7 +7,6 @@
 #include "address_map_arm.h"
 #include "interrupt_ID.h"
 
-
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Intel FPGA University Program");
 MODULE_DESCRIPTION("Embedded Linux Stopwatch - VT100 Terminal Version");
@@ -31,28 +30,22 @@ volatile int *SW_ptr;
  */
 
 /*
- * Time is stored in hundredths of a second.
+ * Time stored in hundredths of a second.
  *
- * 59:59:99
- *
- * = 59 * 60 * 100
- * + 59 * 100
- * + 99
- *
- * = 359999
+ * 59:59:99 = 359999
  */
 int time = 359999;
 
 
 /*
- * running = 1 : stopwatch is running
- * running = 0 : stopwatch is paused / setting
+ * running = 1 -> running
+ * running = 0 -> paused / setting
  */
 int running = 1;
 
 
 /*
- * Which digit will be changed next.
+ * Digit-setting order:
  *
  * 0 -> DD ones
  * 1 -> DD tens
@@ -65,7 +58,7 @@ int set_digit = 0;
 
 
 /* ============================================================
- * VT100 color codes
+ * VT100 colors
  * ============================================================
  */
 
@@ -86,20 +79,16 @@ void print_time(void)
     int hundredths;
 
     min = time / 6000;
-
     sec = (time % 6000) / 100;
-
     hundredths = time % 100;
 
-
     /*
-     * Running -> GREEN
-     *
-     * Paused  -> RED
+     * Running -> green
+     * Paused  -> red
      */
     if (running)
     {
-        printk(KERN_INFO
+        printk(KERN_ALERT
                VT100_GREEN
                "%02d:%02d:%02d"
                VT100_RESET
@@ -110,7 +99,7 @@ void print_time(void)
     }
     else
     {
-        printk(KERN_INFO
+        printk(KERN_ALERT
                VT100_RED
                "%02d:%02d:%02d"
                VT100_RESET
@@ -127,7 +116,7 @@ void print_time(void)
  * ============================================================
  */
 
-void set_stopwatch_digit(int position, int value)
+void set_stopwatch_digit(int position, int switch_value)
 {
     int min;
     int sec;
@@ -142,21 +131,21 @@ void set_stopwatch_digit(int position, int value)
     int dd_tens;
     int dd_ones;
 
+    int digit;
+
 
     /* --------------------------------------------------------
-     * Extract current MM:SS:DD
+     * Extract MM:SS:DD
      * --------------------------------------------------------
      */
 
     min = time / 6000;
-
     sec = (time % 6000) / 100;
-
     hundredths = time % 100;
 
 
     /* --------------------------------------------------------
-     * Split into six individual decimal digits
+     * Split into six digits
      * --------------------------------------------------------
      */
 
@@ -171,68 +160,108 @@ void set_stopwatch_digit(int position, int value)
 
 
     /* --------------------------------------------------------
-     * Modify exactly ONE digit
+     * Change exactly one digit
      * --------------------------------------------------------
      */
 
     switch (position)
     {
-        /*
-         * MM:SS:D[D]
-         */
         case 0:
+            /*
+             * DD ones
+             *
+             * range: 0-9
+             */
+            digit = switch_value;
 
-            dd_ones = value;
+            if (digit > 9)
+                digit = 9;
+
+            dd_ones = digit;
 
             break;
 
 
-        /*
-         * MM:SS:[D]D
-         */
         case 1:
+            /*
+             * DD tens
+             *
+             * range: 0-9
+             */
+            digit = switch_value;
 
-            dd_tens = value;
+            if (digit > 9)
+                digit = 9;
+
+            dd_tens = digit;
 
             break;
 
 
-        /*
-         * MM:S[S]:DD
-         */
         case 2:
+            /*
+             * SS ones
+             *
+             * range: 0-9
+             */
+            digit = switch_value;
 
-            sec_ones = value;
+            if (digit > 9)
+                digit = 9;
+
+            sec_ones = digit;
 
             break;
 
 
-        /*
-         * MM:[S]S:DD
-         */
         case 3:
+            /*
+             * SS tens
+             *
+             * range: 0-5
+             *
+             * This keeps seconds <= 59.
+             */
+            digit = switch_value;
 
-            sec_tens = value;
+            if (digit > 5)
+                digit = 5;
+
+            sec_tens = digit;
 
             break;
 
 
-        /*
-         * M[M]:SS:DD
-         */
         case 4:
+            /*
+             * MM ones
+             *
+             * range: 0-9
+             */
+            digit = switch_value;
 
-            min_ones = value;
+            if (digit > 9)
+                digit = 9;
+
+            min_ones = digit;
 
             break;
 
 
-        /*
-         * [M]M:SS:DD
-         */
         case 5:
+            /*
+             * MM tens
+             *
+             * range: 0-5
+             *
+             * This keeps minutes <= 59.
+             */
+            digit = switch_value;
 
-            min_tens = value;
+            if (digit > 5)
+                digit = 5;
+
+            min_tens = digit;
 
             break;
     }
@@ -272,8 +301,6 @@ void set_stopwatch_digit(int position, int value)
 
 /* ============================================================
  * Timer interrupt handler
- *
- * Timer0 generates an interrupt every 0.01 second.
  * ============================================================
  */
 
@@ -283,15 +310,13 @@ irq_handler_t timer_irq_handler(
     struct pt_regs *regs)
 {
     /*
-     * Clear current Timer0 interrupt.
+     * Clear Timer0 interrupt.
      */
     *(timer0_ptr) = 0;
 
 
     /*
-     * Count down only when running.
-     *
-     * Do not go below 00:00:00.
+     * Count down only while running.
      */
     if (running && time > 0)
     {
@@ -300,14 +325,10 @@ irq_handler_t timer_irq_handler(
 
 
     /*
-     * Do NOT print here.
+     * Do not print here.
      *
-     * Timer interrupt happens 100 times/sec.
-     *
-     * Time is printed only when the user
-     * presses KEY0 or KEY1.
+     * Timer interrupt occurs every 0.01 sec.
      */
-
 
     return (irq_handler_t) IRQ_HANDLED;
 }
@@ -315,14 +336,16 @@ irq_handler_t timer_irq_handler(
 
 /* ============================================================
  * KEY interrupt handler
+ * ============================================================
  *
  * KEY0:
- *      running -> pause
- *      paused  -> run
+ *      toggle run/pause
+ *      no printing
  *
  * KEY1:
  *      running -> print current time
- *      paused  -> set one digit using switches
+ *      paused  -> set one digit, then print
+ *
  * ============================================================
  */
 
@@ -337,12 +360,6 @@ irq_handler_t key_irq_handler(
 
     /*
      * Read KEY Edgecapture register.
-     *
-     * KEY_ptr + 3
-     *
-     * because:
-     *
-     * KEY base + 0x0C
      */
     press = *(KEY_ptr + 3);
 
@@ -355,47 +372,33 @@ irq_handler_t key_irq_handler(
     if (press & 0x1)
     {
         /*
-         * If running:
-         *
-         * pause stopwatch and begin setting
-         * from the rightmost digit.
+         * Running -> paused
          */
         if (running)
         {
             running = 0;
 
+
             /*
-             * Start setting sequence again
-             * from DD ones.
+             * Begin setting from the
+             * rightmost digit again.
              */
             set_digit = 0;
-
-
-            /*
-             * Since running == 0,
-             * print_time() displays RED.
-             */
-            print_time();
         }
 
 
         /*
-         * If paused:
-         *
-         * KEY0 concludes setting procedure
-         * and resumes stopwatch.
+         * Paused -> running
          */
         else
         {
             running = 1;
-
-
-            /*
-             * Since running == 1,
-             * print_time() displays GREEN.
-             */
-            print_time();
         }
+
+
+        /*
+         * KEY0 does NOT print anything.
+         */
     }
 
 
@@ -408,9 +411,9 @@ irq_handler_t key_irq_handler(
     {
         /*
          * ----------------------------------------------------
-         * Stopwatch is RUNNING
+         * If running:
          *
-         * KEY1 only prints the current time.
+         * only display current time.
          * ----------------------------------------------------
          */
         if (running)
@@ -421,100 +424,76 @@ irq_handler_t key_irq_handler(
 
         /*
          * ----------------------------------------------------
-         * Stopwatch is PAUSED
+         * If paused:
          *
-         * KEY1 sets one digit.
+         * set exactly one digit.
          * ----------------------------------------------------
          */
         else
         {
             /*
-             * Read SW switches as a binary value.
+             * Read SW9-SW0 as one 10-bit
+             * binary number.
              *
              * 0x3FF =
-             *
              * 0b1111111111
-             *
-             * so only SW9-SW0 are kept.
              */
             switch_value =
                 *SW_ptr & 0x3FF;
 
 
             /*
-             * From your test of the professor's
-             * sample program:
+             * Set current digit.
              *
-             * one digit can only be 0-9.
+             * The function will clamp:
+             *
+             * 0-9 positions -> max 9
+             * 0-5 positions -> max 5
              */
-            if (switch_value <= 9)
-            {
-                /*
-                 * Modify exactly one digit.
-                 */
-                set_stopwatch_digit(
-                    set_digit,
-                    switch_value
-                );
-
-
-                /*
-                 * Print updated time.
-                 *
-                 * Since stopwatch is paused,
-                 * this appears RED.
-                 */
-                print_time();
-
-
-                /*
-                 * Move to next digit:
-                 *
-                 * 0 -> DD ones
-                 * 1 -> DD tens
-                 * 2 -> SS ones
-                 * 3 -> SS tens
-                 * 4 -> MM ones
-                 * 5 -> MM tens
-                 */
-                set_digit++;
-
-
-                /*
-                 * After sixth digit,
-                 * return to rightmost digit.
-                 */
-                if (set_digit == 6)
-                {
-                    set_digit = 0;
-                }
-            }
+            set_stopwatch_digit(
+                set_digit,
+                switch_value
+            );
 
 
             /*
-             * Invalid value:
+             * Print updated time.
              *
-             * Do not modify the stopwatch.
-             * Do not advance to the next digit.
+             * Since running == 0,
+             * this will be RED.
              */
-            else
+            print_time();
+
+
+            /*
+             * Move to next digit:
+             *
+             * DD ones
+             * DD tens
+             * SS ones
+             * SS tens
+             * MM ones
+             * MM tens
+             */
+            set_digit++;
+
+
+            /*
+             * After six digits,
+             * return to the rightmost digit.
+             */
+            if (set_digit == 6)
             {
-                printk(KERN_INFO
-                       VT100_RED
-                       "Invalid SW value: %d (use 0-9)"
-                       VT100_RESET
-                       "\n",
-                       switch_value);
+                set_digit = 0;
             }
         }
     }
 
 
     /*
-     * Clear captured KEY interrupt bits.
+     * Clear KEY Edgecapture bits.
      *
-     * Writing a 1 clears the corresponding
-     * Edgecapture bit.
+     * Writing 1 clears the captured bit.
      */
     *(KEY_ptr + 3) = press;
 
@@ -556,7 +535,7 @@ static int __init initialize_stopwatch_handler(void)
 
 
     /* --------------------------------------------------------
-     * Set virtual pointers to FPGA devices
+     * FPGA pointers
      * --------------------------------------------------------
      */
 
@@ -573,7 +552,7 @@ static int __init initialize_stopwatch_handler(void)
 
 
     /* --------------------------------------------------------
-     * Clear old KEY Edgecapture values
+     * Clear old KEY events
      * --------------------------------------------------------
      */
 
@@ -635,44 +614,32 @@ static int __init initialize_stopwatch_handler(void)
 
         iounmap(LW_virtual);
 
-
         return ret_val;
     }
 
 
     /* --------------------------------------------------------
-     * Enable ONLY KEY0 and KEY1 interrupts
+     * Enable only KEY0 and KEY1
      * --------------------------------------------------------
      *
-     * KEY1 KEY0
-     *   1    1
+     * bit 0 -> KEY0
+     * bit 1 -> KEY1
      *
-     * binary:
-     *
-     * 0011
-     *
-     * = 0x3
+     * 0b0011 = 0x3
      */
 
     *(KEY_ptr + 2) = 0x3;
 
 
     /* --------------------------------------------------------
-     * Configure FPGA Timer0
+     * Configure Timer0
      * --------------------------------------------------------
      *
-     * Timer frequency:
+     * Timer clock = 100 MHz
      *
-     * 100 MHz
-     *
-     * Desired period:
-     *
-     * 0.01 sec
-     *
-     * Therefore:
+     * desired interrupt period = 0.01 sec
      *
      * 100,000,000 * 0.01
-     *
      * = 1,000,000
      */
 
@@ -680,18 +647,14 @@ static int __init initialize_stopwatch_handler(void)
 
 
     /*
-     * Counter start value:
-     *
-     * low 16 bits
+     * Low 16 bits.
      */
     *(timer0_ptr + 2) =
         counter & 0xFFFF;
 
 
     /*
-     * Counter start value:
-     *
-     * high 16 bits
+     * High 16 bits.
      */
     *(timer0_ptr + 3) =
         (counter >> 16) & 0xFFFF;
@@ -701,14 +664,11 @@ static int __init initialize_stopwatch_handler(void)
      * Start timer
      * --------------------------------------------------------
      *
-     * Control register:
-     *
-     * STOP  = 0
      * START = 1
      * CONT  = 1
      * ITO   = 1
      *
-     * = 0x7
+     * 0x7
      */
 
     *(timer0_ptr + 1) = 0x7;
@@ -727,9 +687,12 @@ static int __init initialize_stopwatch_handler(void)
 
 
     /*
-     * Initial value appears GREEN.
+     * Do NOT print here.
+     *
+     * insmod stopwatch.ko
+     *
+     * should not print the stopwatch time.
      */
-    print_time();
 
 
     return 0;
@@ -750,21 +713,19 @@ static void __exit cleanup_stopwatch_handler(void)
 
 
     /*
-     * Stop FPGA Timer0.
-     *
-     * STOP = 1
+     * Stop Timer0.
      */
     *(timer0_ptr + 1) = 0x8;
 
 
     /*
-     * Clear remaining KEY edge events.
+     * Clear pending KEY events.
      */
     *(KEY_ptr + 3) = 0xF;
 
 
     /*
-     * Unregister Timer0 interrupt.
+     * Free Timer0 IRQ.
      */
     free_irq(
         TIMER0_IRQ,
@@ -773,7 +734,7 @@ static void __exit cleanup_stopwatch_handler(void)
 
 
     /*
-     * Unregister KEY interrupt.
+     * Free KEY IRQ.
      */
     free_irq(
         KEY_IRQ,
@@ -789,7 +750,7 @@ static void __exit cleanup_stopwatch_handler(void)
 
 
 /* ============================================================
- * Register kernel module
+ * Register module
  * ============================================================
  */
 
