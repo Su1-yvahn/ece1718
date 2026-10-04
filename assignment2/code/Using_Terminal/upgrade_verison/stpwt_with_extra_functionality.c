@@ -310,7 +310,6 @@ void set_stopwatch_digit(int position, int switch_value)
         case 1:
             /*
              * DD tens
-             *
              * range: 0-9
              */
             digit = switch_value;
