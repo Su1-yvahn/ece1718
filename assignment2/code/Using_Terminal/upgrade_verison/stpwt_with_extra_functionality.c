@@ -4,8 +4,8 @@
 #include <linux/interrupt.h>
 #include <asm/io.h>
 
-#include "address_map_arm.h"
-#include "interrupt_ID.h"
+#include "../address_map_arm.h"
+#include "../interrupt_ID.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Intel FPGA University Program");
