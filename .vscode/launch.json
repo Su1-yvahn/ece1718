@@ -7,9 +7,9 @@
       "request": "launch",
       "args": [],
       "stopAtEntry": false,
-      "externalConsole": false,
-      "cwd": "/u/b/yinzhiqi/Documents/ece1718/assignment2/code/Using_HEX_displays",
-      "program": "/u/b/yinzhiqi/Documents/ece1718/assignment2/code/Using_HEX_displays/build/Debug/outDebug",
+      "externalConsole": true,
+      "cwd": "e:/ece1718_lab2/assignment1",
+      "program": "e:/ece1718_lab2/assignment1/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
