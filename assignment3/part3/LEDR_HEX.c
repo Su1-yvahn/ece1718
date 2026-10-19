@@ -11,6 +11,7 @@
  * seven-segment displays through /dev/HEX. */
 
 // START of declarations needed for the character device drivers
+// Functions that will be called by Linux kernel when a user program performs read, write, open, close on the file /dev/chardev
 static int LEDR_device_open(struct inode *, struct file *);
 static int LEDR_device_release(struct inode *, struct file *);
 static ssize_t LEDR_device_write(struct file *, const char *, size_t, loff_t *);
@@ -22,9 +23,10 @@ static ssize_t HEX_device_write(struct file *, const char *, size_t, loff_t *);
 #define SUCCESS 0
 #define LEDR_DEV "LEDR"
 #define HEX_DEV "HEX"
-#define LEDR_SIZE 4 // three hexadecimal digits plus '\n'
+#define LEDR_SIZE 4 // three hexadecimal digits plus '\n' (e.g., In "echo 3FF > /dev/LEDR", has 3FF\n, which is 4 bytes)
 #define HEX_SIZE 17 // enough for "-r HHHH HHHHHHHH\n"
 
+// 1st data structure that provides reference to the function prototypes (read, write, open, close)
 static struct file_operations LEDR_fops = {
     .owner = THIS_MODULE,
     .write = LEDR_device_write,
@@ -37,10 +39,11 @@ static struct file_operations HEX_fops = {
     .open = HEX_device_open,
     .release = HEX_device_release};
 
+// 2nd data structure that represents character device driver
 static struct miscdevice LEDR = {
     .minor = MISC_DYNAMIC_MINOR,
     .name = LEDR_DEV,
-    .fops = &LEDR_fops,
+    .fops = &LEDR_fops, // pointer to the driver's file operation data structure
     .mode = 0666};
 
 static struct miscdevice HEX = {
@@ -67,19 +70,20 @@ static const unsigned char seven_seg_decode_table[10] = {
 // END of declarations for the ports
 
 /* Code to initialize the drivers */
+// "init_drivers" function is executed (create CDD) when the specific character device driver being inserted into Linux kernel
 static int __init init_drivers(void)
 {
     int err = 0;
 
     /* Make the LEDR character device driver */
-    err = misc_register(&LEDR);
+    err = misc_register(&LEDR); // calls the linux library function "misc_register" with an argument that is a pointer to the LDER variable
     if (err < 0)
     {
         printk(KERN_ERR "/dev/%s: misc_register() failed\n", LEDR_DEV);
     }
     else
     {
-        printk(KERN_INFO "/dev/%s driver registered\n", LEDR_DEV);
+        printk(KERN_INFO "/dev/%s driver registered\n", LEDR_DEV); // successfully being created by linux kernel
         LEDR_registered = 1;
     }
 
@@ -87,11 +91,11 @@ static int __init init_drivers(void)
     err = misc_register(&HEX);
     if (err < 0)
     {
-        printk(KERN_ERR "/dev/%s: misc_register() failed\n", HEX_DEV);
+        printk(KERN_ERR "/dev/%s: misc_register() failed\n", HEX_DEV); // output appears directly at the linux terminal
     }
     else
     {
-        printk(KERN_INFO "/dev/%s driver registered\n", HEX_DEV);
+        printk(KERN_INFO "/dev/%s driver registered\n", HEX_DEV); // output is stored in a linux log file
         HEX_registered = 1;
     }
 
@@ -111,6 +115,7 @@ static int __init init_drivers(void)
 }
 
 /* Remove the character device drivers */
+// remove Character Device Driver when the character Device Driver is rmmod from the Linux Kernel
 static void __exit stop_drivers(void)
 {
     /* Turn off outputs before unmapping the bridge */
@@ -118,7 +123,7 @@ static void __exit stop_drivers(void)
     *HEX3_HEX0_ptr = 0;
     *HEX5_HEX4_ptr = 0;
 
-    iounmap(LW_virtual);
+    iounmap(LW_virtual); // unmap first and then deregister device driver from kernel
 
     if (LEDR_registered)
     {
@@ -144,24 +149,28 @@ static int LEDR_device_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-/* Called when a process writes to the LEDR driver. The expected data is a
- * three-digit hexadecimal value, such as "3FF\n". */
-static ssize_t LEDR_device_write(struct file *filp, const char *buffer,
-                                 size_t length, loff_t *offset)
+/* Called when a process writes to the LEDR driver. The expected data is a three-digit hexadecimal value, such as "3FF\n". */
+// buffer is used to get character data from the user program into device driver
+// length is the maximum number of bytes that can be stored in the bufer
+// Important: echo 3FF > /dev/LEDR will cause write(/dev/LEDR, "3FF\n", 4), then calls .write = LEDR_device_write function here
+static ssize_t LEDR_device_write(struct file *filp, const char *buffer, size_t length, loff_t *offset)
 {
     char LEDR_string[LEDR_SIZE + 1];
     unsigned int LEDR_data;
     size_t bytes;
 
-    bytes = length;
+    // check overflow: can copy all at once, or not?
+    bytes = length; // how much did user try to write? If length is 10 bytes, then bytes is also 10 bytes, but too big to send
     if (bytes > LEDR_SIZE)
         bytes = LEDR_SIZE;
 
-    if (copy_from_user(LEDR_string, buffer, bytes) != 0)
+    // copy_from_user() returns the number of bytes that could NOT be copied
+    // copy_from_user(destination, source, number_of_bytes)
+    if (copy_from_user(LEDR_string, buffer, bytes) != 0) // copy "bytes" from user-level memory pointed to by "buffer" into kernel space array "LEDR_string"
         printk(KERN_ERR "/dev/%s: copy_from_user unsuccessful\n", LEDR_DEV);
 
-    LEDR_string[bytes] = '\0';
-    *offset += bytes;
+    LEDR_string[bytes] = '\0'; // (turn into valid C string, required for C string) NULL terminate
+    *offset += bytes;          // keep track of how much was copied (where you currently are in the file)
 
     /* Print usage information when the user writes -- to the driver. */
     if ((LEDR_string[0] == '-') && (LEDR_string[1] == '-'))
@@ -171,9 +180,9 @@ static ssize_t LEDR_device_write(struct file *filp, const char *buffer,
         return length;
     }
 
-    /* Convert the ASCII hexadecimal string into an integer. */
-    if (sscanf(LEDR_string, "%x", &LEDR_data) == 1)
-        *LEDR_ptr = LEDR_data & 0x3FF; // only LEDR9-LEDR0 are used
+    /* Convert the ASCII character string(e.g., '3'(0x33 in ASCII) 'F'(0x46 in ASCII) 'F') into an integer. */
+    if (sscanf(LEDR_string, "%x", &LEDR_data) == 1) // convert one hexdecimal integer number from the LDER_string ASCII (e.g., '3' 'F' 'F') into an integer(1023 or 0x3FF) and store it in LEDR_data
+        *LEDR_ptr = LEDR_data & 0x3FF;              // only LEDR9-LEDR0 are used
 
     return length;
 }
@@ -200,8 +209,7 @@ static int HEX_device_release(struct inode *inode, struct file *file)
  *     -r HHHH HHHHHHHH
  * writes the hexadecimal bit patterns directly to the HEX5-HEX4 and
  * HEX3-HEX0 hardware registers. */
-static ssize_t HEX_device_write(struct file *filp, const char *buffer,
-                                size_t length, loff_t *offset)
+static ssize_t HEX_device_write(struct file *filp, const char *buffer, size_t length, loff_t *offset)
 {
     char HEX_string[HEX_SIZE + 1];
     int HEX_data;
@@ -216,11 +224,12 @@ static ssize_t HEX_device_write(struct file *filp, const char *buffer,
     if (bytes > HEX_SIZE)
         bytes = HEX_SIZE;
 
+    // copy_from_user() returns the number of bytes that could NOT be copied
     if (copy_from_user(HEX_string, buffer, bytes) != 0)
         printk(KERN_ERR "/dev/%s: copy_from_user unsuccessful\n", HEX_DEV);
 
     HEX_string[bytes] = '\0';
-    *offset += bytes;
+    *offset += bytes; // keep track of how much was copied (where you currently are in the file)
 
     /* Print usage information when the user writes -- to the driver. */
     if ((HEX_string[0] == '-') && (HEX_string[1] == '-'))
@@ -235,8 +244,7 @@ static ssize_t HEX_device_write(struct file *filp, const char *buffer,
     /* Raw mode: directly write segment bit patterns to the two HEX registers. */
     if ((HEX_string[0] == '-') && (HEX_string[1] == 'r'))
     {
-        if (sscanf(HEX_string, "-r %x %x", &HEX5_HEX4_data,
-                   &HEX3_HEX0_data) == 2)
+        if (sscanf(HEX_string, "-r %x %x", &HEX5_HEX4_data, &HEX3_HEX0_data) == 2)
         {
             *HEX5_HEX4_ptr = HEX5_HEX4_data & 0xFFFF;
             *HEX3_HEX0_ptr = HEX3_HEX0_data;
@@ -254,17 +262,17 @@ static ssize_t HEX_device_write(struct file *filp, const char *buffer,
         HEX_data %= 1000000;
 
     /* Decode one decimal digit at a time, starting with HEX0. */
-    for (i = 0; i < 6; ++i)
+    for (i = 0; i < 6; ++i) // i = 0: HEX0; i = 1: HEX1; etc
     {
-        digit = HEX_data % 10;
+        digit = HEX_data % 10; // get the rightmost decimal digit
         code = seven_seg_decode_table[digit];
 
         if (i < 4)
-            HEX3_HEX0_data |= code << (i * 8);
+            HEX3_HEX0_data |= code << (i * 8); // Each HEX display gets 8 bits (e.g., code = 0x4F; and for i = 0: code << (0 * 8))
         else
             HEX5_HEX4_data |= code << ((i - 4) * 8);
 
-        HEX_data /= 10;
+        HEX_data /= 10; // remove that rightmost decimal digit to proceed to the next one
     }
 
     *HEX3_HEX0_ptr = HEX3_HEX0_data;

@@ -120,8 +120,7 @@ int main(void)
                 else
                     total += SW_value;
 
-                printf("KEY0 ADD:      SW = %u, total = %u\n",
-                       SW_value, total);
+                printf("KEY0 ADD:      SW = %u, total = %u\n", SW_value, total);
             }
 
             // KEY1: subtract SW value from total.
@@ -132,8 +131,7 @@ int main(void)
                 else
                     total -= SW_value;
 
-                printf("KEY1 SUBTRACT: SW = %u, total = %u\n",
-                       SW_value, total);
+                printf("KEY1 SUBTRACT: SW = %u, total = %u\n", SW_value, total);
             }
 
             // KEY2: reset total to zero.
@@ -141,8 +139,7 @@ int main(void)
             {
                 total = 0;
 
-                printf("KEY2 RESET:    SW = %u, total = %u\n",
-                       SW_value, total);
+                printf("KEY2 RESET:    SW = %u, total = %u\n", SW_value, total);
             }
 
             // KEY3: set total equal to the current SW value.
@@ -150,8 +147,7 @@ int main(void)
             {
                 total = SW_value;
 
-                printf("KEY3 SET:      SW = %u, total = %u\n",
-                       SW_value, total);
+                printf("KEY3 SET:      SW = %u, total = %u\n", SW_value, total);
             }
 
             // Display the resulting total on HEX5-HEX0.
