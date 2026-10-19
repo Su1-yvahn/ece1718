@@ -75,7 +75,7 @@ int main(void)
         while ((ret_val = read(KEY_FD, KEY_buffer, KEY_BYTES)) > 0)
             chars_read += ret_val;
 
-        KEY_buffer[chars_read] = '\0';
+        KEY_buffer[chars_read] = '\0'; // add NULL terminate
         KEY_value = 0;
         sscanf(KEY_buffer, "%X", &KEY_value);
 
@@ -88,7 +88,7 @@ int main(void)
             while ((ret_val = read(SW_FD, SW_buffer, SW_BYTES)) > 0)
                 chars_read += ret_val;
 
-            SW_buffer[chars_read] = '\0';
+            SW_buffer[chars_read] = '\0'; // add NULL terminate
             SW_value = 0;
             sscanf(SW_buffer, "%X", &SW_value);
 
