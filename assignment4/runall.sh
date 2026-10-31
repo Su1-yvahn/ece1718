@@ -99,9 +99,9 @@ case "$1" in
     echo "---     Installing built in KEY, SW, and LEDR drivers                   ---"
     echo "---     (if you prefer to use your own drivers, modify this script as   ---"
     echo "---     needed and include your compiled drivers with your submission)  ---"
-    insmod /home/root/all_labs/assignment4/drivers/SW.ko
-    insmod /home/root/all_labs/assignment4/drivers/KEY.ko
-    insmod /home/root/all_labs/assignment4/drivers/LEDR.ko
+    insmod /home/root/Linux_Libraries/drivers/SW.ko
+    insmod /home/root/Linux_Libraries/drivers/KEY.ko
+    insmod /home/root/Linux_Libraries/drivers/LEDR.ko
     cd ../part3 && make clean && make
     echo ""
     echo "---     Running Part 3 (Ctrl-C to quit)          ---"
@@ -121,9 +121,9 @@ case "$1" in
     echo "---     Installing built in KEY, SW, and LEDR drivers                   ---"
     echo "---     (if you prefer to use your own drivers, modify this script as   ---"
     echo "---     needed and include your compiled drivers with your submission)  ---"
-    insmod /home/root/all_labs/assignment4/drivers/SW.ko
-    insmod /home/root/all_labs/assignment4/drivers/KEY.ko
-    insmod /home/root/all_labs/assignment4/drivers/LEDR.ko
+    insmod /home/root/Linux_Libraries/drivers/SW.ko
+    insmod /home/root/Linux_Libraries/drivers/KEY.ko
+    insmod /home/root/Linux_Libraries/drivers/LEDR.ko
     cd ../part4 && make clean && make
     echo ""
     echo "---     Running Part 4 (Ctrl-C to quit)          ---"
@@ -145,9 +145,9 @@ additional) echo "---          Setting up Additional Part         ---"
     [ -e /dev/stopwatch ] || insmod ../part2/stopwatch.ko
     echo ""
     echo "---     Installing built in KEY, SW, and LEDR drivers     ---"
-    insmod /home/root/all_labs/assignment4/drivers/SW.ko
-    insmod /home/root/all_labs/assignment4/drivers/KEY.ko
-    insmod /home/root/all_labs/assignment4/drivers/LEDR.ko
+    insmod /home/root/Linux_Libraries/drivers/SW.ko
+    insmod /home/root/Linux_Libraries/drivers/KEY.ko
+    insmod /home/root/Linux_Libraries/drivers/LEDR.ko
     echo ""
     echo "---   To uninstall drivers: ./runall.sh clean     ---"
     PROG=$(make -s name)

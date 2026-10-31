@@ -66,9 +66,19 @@ or provide any additional information to the grader, PLEASE TYPE IT HERE:
 
 
 ADDITIONAL PART (leave blank if you did not do one)
-Which part it is based on (3 or 4):
+Which part it is based on (3 or 4): Part 4
+
 
 What I added:
 
+I added a score-and-lives system to the Part 4 math game. The player starts with 3 lives and a score of 0. Each correct answer increases the score by 1. An incorrect answer does not decrease the score, but it removes one HP. The player can continue attempting the same question as long as time remains and at least one life is left. The game ends immediately when all 3 lives are lost, even if the stopwatch has not expired. At the end of the game, the program displays the total questions asked, total score earned, number of correct answers, number of wrong attempts, remaining lives, and average response time.
+
+
 How to use it (which KEYs and switches do what, what shows on the LEDs, HEX or terminal):
+
+The KEY and SW controls before the game are the same as in Part 4. KEY1 uses the SW value to set the hundredths (DD), KEY2 sets the seconds (SS), and KEY3 sets the minutes (MM). The SW value is also displayed on LEDR when KEY1, KEY2, or KEY3 is pressed. KEY0 starts the game.
+
+During the game, HEX5–HEX0 display the remaining stopwatch time. The terminal displays each math question, and the user enters the answer through the terminal. The remaining time is also printed. For an incorrect answer, the program displays “Try again” and removes one HP.
+
+During the game, LEDR1–LEDR0 represent the number of remaining lives in binary: 11 for 3 lives, 10 for 2 lives, 01 for 1 life, and 00 for 0 lives. When the number of lives reaches 0, the game ends and the final game statistics are displayed on the terminal.
 
