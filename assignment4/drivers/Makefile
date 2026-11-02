@@ -1,6 +1,5 @@
 obj-m += KEY_SW.o
 obj-m += LEDR_HEX.o
-obj-m += stopwatch.o
 
 .PHONY: all clean
 
