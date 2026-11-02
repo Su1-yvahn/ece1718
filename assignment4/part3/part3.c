@@ -1,195 +1,227 @@
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <signal.h>
 
-// Global flag for program termination
-static volatile sig_atomic_t program_running = 1;
+#define KEY_BYTES 2
+#define SW_BYTES 4
+#define STOPWATCH_BYTES 9
 
-// SIGINT handler: Ctrl+C
-void handle_sigint(int sig)
+volatile sig_atomic_t stop = 0;
+
+void catchSIGINT(int signum)
 {
-    (void)sig;
-    program_running = 0;
+    (void)signum;
+    stop = 1;
 }
 
-// Read a device using a new file descriptor
-int read_device(const char *path, char *buffer, size_t size)
-{
-    int fd = open(path, O_RDONLY);
-
-    if (fd < 0) {
-        perror(path);
-        return -1;
-    }
-
-    ssize_t n = read(fd, buffer, size - 1);
-    close(fd);
-
-    if (n <= 0) {
-        fprintf(stderr, "Failed to read %s\n", path);
-        return -1;
-    }
-
-    buffer[n] = '\0';
-    return 0;
-}
-
-// Write a command to a device
-int send_command(int fd, const char *command)
-{
-    size_t length = strlen(command);
-
-    if (write(fd, command, length) != (ssize_t)length) {
-        perror("write device");
-        return -1;
-    }
-
-    return 0;
-}
+/* This program uses /dev/KEY, /dev/SW, /dev/LEDR,
+ * and /dev/stopwatch.
+ *
+ * KEY0: toggle run/pause
+ * KEY1: set DD from SW (max 99)
+ * KEY2: set SS from SW (max 59)
+ * KEY3: set MM from SW (max 59)
+ *
+ * KEY1/2/3 also update LEDR with the SW value.
+ * Ctrl+C stops the stopwatch and clears HEX/LEDR.
+ */
 
 int main(void)
 {
-    int fd_stopwatch;
-    int fd_ledr;
+    int KEY_FD, SW_FD, LEDR_FD, STOPWATCH_FD;
 
-    char key_buffer[16];
-    char sw_buffer[16];
-    char time_buffer[32];
+    char KEY_buffer[KEY_BYTES + 1];
+    char SW_buffer[SW_BYTES + 1];
+    char STOPWATCH_buffer[STOPWATCH_BYTES + 1];
+    char TIME_buffer[16];
 
-    unsigned int key_value, sw_value;
+    int ret_val, chars_read;
+    unsigned int KEY_value, SW_value;
     int MM, SS, DD;
     int running = 1;
+    int exit_status = 0;
 
-    // Register SIGINT handler
-    struct sigaction sa = {0};
-    sa.sa_handler = handle_sigint;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    // Catch Ctrl+C
+    signal(SIGINT, catchSIGINT);
 
-    if (sigaction(SIGINT, &sa, NULL) < 0) {
-        perror("sigaction");
+    // Open all character device drivers
+    if ((KEY_FD = open("/dev/KEY", O_RDONLY)) == -1){
+        printf("Error opening /dev/KEY: %s\n", strerror(errno));
         return 1;
     }
 
-    // Open stopwatch
-    fd_stopwatch = open("/dev/stopwatch", O_WRONLY);
-
-    if (fd_stopwatch < 0) {
-        perror("open stopwatch");
+    if ((SW_FD = open("/dev/SW", O_RDONLY)) == -1){
+        printf("Error opening /dev/SW: %s\n", strerror(errno));
+        close(KEY_FD);
         return 1;
     }
 
-    // Open LEDR
-    fd_ledr = open("/dev/LEDR", O_WRONLY);
-
-    if (fd_ledr < 0) {
-        perror("open LEDR");
-        close(fd_stopwatch);
+    if ((LEDR_FD = open("/dev/LEDR", O_WRONLY)) == -1){
+        printf("Error opening /dev/LEDR: %s\n", strerror(errno));
+        close(KEY_FD);
+        close(SW_FD);
         return 1;
     }
 
-    // Enable display and start stopwatch
-    if (send_command(fd_stopwatch, "disp") < 0 ||
-        send_command(fd_stopwatch, "run") < 0)
-        goto cleanup;
+    if ((STOPWATCH_FD = open("/dev/stopwatch", O_RDWR)) == -1){
+        printf("Error opening /dev/stopwatch: %s\n", strerror(errno));
+        close(KEY_FD);
+        close(SW_FD);
+        close(LEDR_FD);
+        return 1;
+    }
 
-    //printf("Part3 running. Press Ctrl+C to exit.\n");
+    // Enable HEX display and start stopwatch
+    if (write(STOPWATCH_FD, "disp", 4) != 4 || write(STOPWATCH_FD, "run", 3) != 3){
+        perror("Initialize stopwatch");
+        stop = 1;
+        exit_status = 1;
+    }
 
-    while (program_running) {
+    while (!stop){
+        // Read KEY edge-capture until EOF
+        chars_read = 0;
 
-        // Read KEY edge-capture
-        if (read_device("/dev/KEY",
-                        key_buffer, sizeof(key_buffer)) < 0) {
-            if (!program_running)
-                break;
-            goto cleanup;
+        while ((ret_val = read(KEY_FD, KEY_buffer + chars_read, KEY_BYTES - chars_read)) > 0){
+            chars_read += ret_val;
         }
 
-        key_value = (unsigned int)strtoul(
-            key_buffer, NULL, 16);
-
-        if (key_value == 0) {
-            usleep(10000);
-            continue;
+        if (stop){
+            break;
         }
 
-        // KEY0: toggle run / pause
-        if (key_value & 0x1) {
+        if (ret_val < 0){
+            printf("Error reading KEY: %s\n", strerror(errno));
+            exit_status = 1;
+            break;
+        }
 
-            const char *command =
-                running ? "stop" : "run";
+        KEY_buffer[chars_read] = '\0';
 
-            if (send_command(fd_stopwatch, command) < 0)
-                goto cleanup;
+        KEY_value = 0;
+        sscanf(KEY_buffer, "%X", &KEY_value);
 
-            running = !running;
-
-            //printf("Stopwatch: %s\n", running ? "RUN" : "PAUSE");
+        // KEY0: toggle run/pause
+        if (KEY_value & 0x1)
+        {
+            if (running)
+            {
+                write(STOPWATCH_FD, "stop", 4);
+                running = 0;
+            }
+            else
+            {
+                write(STOPWATCH_FD, "run", 3);
+                running = 1;
+            }
         }
 
         // KEY1 / KEY2 / KEY3
-        if (key_value & 0xE) {
-
+        if (KEY_value & 0xE){
             // Read SW only when KEY1/2/3 pressed
-            if (read_device("/dev/SW",
-                            sw_buffer, sizeof(sw_buffer)) < 0)
-                goto cleanup;
+            chars_read = 0;
 
-            sw_value = (unsigned int)strtoul(
-                sw_buffer, NULL, 16);
+            while ((ret_val = read(SW_FD, SW_buffer + chars_read, SW_BYTES - chars_read)) > 0){
+                chars_read += ret_val;
+            }
 
-            // Update LEDR
-            if (send_command(fd_ledr, sw_buffer) < 0)
-                goto cleanup;
+            if (stop)
+                break;
 
-            // Read stopwatch
-            if (read_device("/dev/stopwatch",
-                            time_buffer, sizeof(time_buffer)) < 0)
-                goto cleanup;
+            if (ret_val < 0)
+            {
+                printf("Error reading SW: %s\n", strerror(errno));
+                exit_status = 1;
+                break;
+            }
 
-            if (sscanf(time_buffer, "%d:%d:%d",
-                       &MM, &SS, &DD) != 3) {
-                fprintf(stderr, "Invalid stopwatch time\n");
-                goto cleanup;
+            SW_buffer[chars_read] = '\0';
+
+            SW_value = 0;
+            sscanf(SW_buffer, "%X", &SW_value);
+
+            // Display SW value on LEDR
+            if (write(LEDR_FD, SW_buffer,  strlen(SW_buffer)) < 0){
+                perror("Write LEDR");
+                exit_status = 1;
+                break;
+            }
+
+            // Read current stopwatch time until EOF
+            chars_read = 0;
+
+            while ((ret_val = read(STOPWATCH_FD, STOPWATCH_buffer + chars_read, STOPWATCH_BYTES - chars_read)) > 0)
+            {
+                chars_read += ret_val;
+            }
+
+            if (stop)
+                break;
+
+            if (ret_val < 0)
+            {
+                printf("Error reading stopwatch: %s\n",
+                       strerror(errno));
+                exit_status = 1;
+                break;
+            }
+
+            STOPWATCH_buffer[chars_read] = '\0';
+
+            if (sscanf(STOPWATCH_buffer, "%d:%d:%d", &MM, &SS, &DD) != 3){
+                printf("Invalid stopwatch time\n");
+                exit_status = 1;
+                break;
             }
 
             // KEY1: set hundredths
-            if (key_value & 0x2)
-                DD = sw_value > 99 ? 99 : sw_value;
+            if (KEY_value & 0x2)
+                DD = SW_value > 99 ? 99 : SW_value;
 
             // KEY2: set seconds
-            if (key_value & 0x4)
-                SS = sw_value > 59 ? 59 : sw_value;
+            if (KEY_value & 0x4)
+                SS = SW_value > 59 ? 59 : SW_value;
 
             // KEY3: set minutes
-            if (key_value & 0x8)
-                MM = sw_value > 59 ? 59 : sw_value;
+            if (KEY_value & 0x8)
+                MM = SW_value > 59 ? 59 : SW_value;
 
-            snprintf(time_buffer, sizeof(time_buffer),
-                     "%02d:%02d:%02d", MM, SS, DD);
+            // Format and write updated time
+            sprintf(TIME_buffer, "%02d:%02d:%02d",
+                    MM, SS, DD);
 
-            //printf("Set stopwatch: %s\n", time_buffer);
+            if (write(STOPWATCH_FD, TIME_buffer,  strlen(TIME_buffer)) < 0){
+                perror("Write stopwatch");
+                exit_status = 1;
+                break;
+            }
         }
 
+        // Avoid busy waiting
         usleep(10000);
     }
 
-    // Stop the countdown
-    send_command(fd_stopwatch, "stop");
+    // Stop stopwatch
+    write(STOPWATCH_FD, "stop", 4);
 
     // Turn off HEX display
-    send_command(fd_stopwatch, "nodisp");
+    write(STOPWATCH_FD, "nodisp", 6);
 
-    // Turn off all LEDs
-    send_command(fd_ledr, "000");
+    // Turn off LEDR
+    write(LEDR_FD, "000", 3);
 
-    close(fd_ledr);
-    close(fd_stopwatch);
+    // Close all devices
+    close(KEY_FD);
+    close(SW_FD);
+    close(LEDR_FD);
+    close(STOPWATCH_FD);
 
-    printf("\nProgram exited. HEX and LEDR cleared.\n");
+    printf("\nProgram exited.\n");
 
-    return 0;
+    return exit_status;
 }
