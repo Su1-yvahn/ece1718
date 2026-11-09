@@ -6,289 +6,251 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define STOPWATCH_DEV "/dev/stopwatch"
+/* Device paths */
+#define KEY_DEVICE "/dev/IntelFPGAUP/KEY"
+#define SW_DEVICE "/dev/IntelFPGAUP/SW"
+#define LEDR_DEVICE "/dev/IntelFPGAUP/LEDR"
+#define STOPWATCH_DEVICE "/dev/stopwatch"
 
-#define KEY_DEV_PRIMARY "/dev/IntelFPGAUP/KEY"
-#define KEY_DEV_FALLBACK "/dev/KEY"
+#define KEY_BYTES 2       // one hexadecimal digit plus '\n'
+#define SW_BYTES 4        // three hexadecimal digits plus '\n'
+#define STOPWATCH_BYTES 9 // MM:SS:DD plus '\n'
 
-#define SW_DEV_PRIMARY "/dev/IntelFPGAUP/SW"
-#define SW_DEV_FALLBACK "/dev/SW"
+volatile sig_atomic_t stop = 0;
 
-#define LEDR_DEV_PRIMARY "/dev/IntelFPGAUP/LEDR"
-#define LEDR_DEV_FALLBACK "/dev/LEDR"
-
-#define KEY0 0x1
-#define KEY1 0x2
-#define KEY2 0x4
-#define KEY3 0x8
-
-static volatile sig_atomic_t stop_program = 0;
-
-static void catchSIGINT(int signum)
+void catchSIGINT(int signum)
 {
     (void)signum;
-    stop_program = 1;
+    stop = 1;
 }
 
-/* Open a device using the professor's /dev/IntelFPGAUP/... path first.
- * If that node does not exist, fall back to /dev/KEY, /dev/SW, or /dev/LEDR.
- * This makes Part 3 work with either driver naming convention. */
-static int open_input_device(const char *primary, const char *fallback)
-{
-    int fd = open(primary, O_RDONLY);
-
-    if (fd == -1 && errno == ENOENT)
-        fd = open(fallback, O_RDONLY);
-
-    if (fd == -1)
-        fprintf(stderr, "Error opening %s or %s: %s\n",
-                primary, fallback, strerror(errno));
-
-    return fd;
-}
-
-/* Read an ASCII hexadecimal value from a character device.
- * Opening the device for each read resets the file offset used by the driver. */
-static int read_hex_device(const char *primary, const char *fallback,
-                           unsigned int *value)
-{
-    int fd;
-    ssize_t n;
-    char buffer[32];
-    char *endptr;
-    unsigned long parsed;
-
-    fd = open_input_device(primary, fallback);
-    if (fd == -1)
-        return -1;
-
-    n = read(fd, buffer, sizeof(buffer) - 1);
-    close(fd);
-
-    if (n < 0)
-    {
-        fprintf(stderr, "Error reading %s/%s: %s\n",
-                primary, fallback, strerror(errno));
-        return -1;
-    }
-
-    if (n == 0)
-    {
-        *value = 0;
-        return 0;
-    }
-
-    buffer[n] = '\0';
-
-    errno = 0;
-    parsed = strtoul(buffer, &endptr, 16);
-    if (errno != 0 || endptr == buffer)
-    {
-        fprintf(stderr, "Invalid value read from device: %s\n", buffer);
-        return -1;
-    }
-
-    *value = (unsigned int)parsed;
-    return 0;
-}
-
-/* Write a command/string to a device with a fixed pathname. */
-static int write_text_device(const char *device, const char *text)
-{
-    int fd;
-    ssize_t n;
-    size_t length = strlen(text);
-
-    fd = open(device, O_WRONLY);
-    if (fd == -1)
-    {
-        fprintf(stderr, "Error opening %s: %s\n", device, strerror(errno));
-        return -1;
-    }
-
-    n = write(fd, text, length);
-    close(fd);
-
-    if (n != (ssize_t)length)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error writing %s: %s\n", device, strerror(errno));
-        else
-            fprintf(stderr, "Short write to %s\n", device);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Write to an FPGA character device using either pathname convention. */
-static int write_fpga_device(const char *primary, const char *fallback,
-                             const char *text)
-{
-    int fd;
-    ssize_t n;
-    size_t length = strlen(text);
-
-    fd = open(primary, O_WRONLY);
-
-    if (fd == -1 && errno == ENOENT)
-        fd = open(fallback, O_WRONLY);
-
-    if (fd == -1)
-    {
-        fprintf(stderr, "Error opening %s or %s: %s\n",
-                primary, fallback, strerror(errno));
-        return -1;
-    }
-
-    n = write(fd, text, length);
-    close(fd);
-
-    if (n != (ssize_t)length)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error writing FPGA device: %s\n", strerror(errno));
-        else
-            fprintf(stderr, "Short write to FPGA device\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Read the current stopwatch value in MM:SS:DD format. */
-static int read_stopwatch(int *MM, int *SS, int *DD)
-{
-    int fd;
-    ssize_t n;
-    char buffer[32];
-
-    fd = open(STOPWATCH_DEV, O_RDONLY);
-    if (fd == -1)
-    {
-        fprintf(stderr, "Error opening %s: %s\n", STOPWATCH_DEV, strerror(errno));
-        return -1;
-    }
-
-    n = read(fd, buffer, sizeof(buffer) - 1);
-    close(fd);
-
-    if (n <= 0)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error reading %s: %s\n", STOPWATCH_DEV, strerror(errno));
-        return -1;
-    }
-
-    buffer[n] = '\0';
-
-    if (sscanf(buffer, "%d:%d:%d", MM, SS, DD) != 3)
-    {
-        fprintf(stderr, "Invalid stopwatch value: %s\n", buffer);
-        return -1;
-    }
-
-    return 0;
-}
-
-/* Update only the stopwatch field(s) selected by KEY1/KEY2/KEY3.
- * The other fields keep their current values. */
-static int set_stopwatch_field(unsigned int keys, unsigned int sw_value)
-{
-    int MM, SS, DD;
-    char command[16];
-
-    if (read_stopwatch(&MM, &SS, &DD) != 0)
-        return -1;
-
-    if (keys & KEY1)
-        DD = (sw_value > 99) ? 99 : (int)sw_value;
-
-    if (keys & KEY2)
-        SS = (sw_value > 59) ? 59 : (int)sw_value;
-
-    if (keys & KEY3)
-        MM = (sw_value > 59) ? 59 : (int)sw_value;
-
-    snprintf(command, sizeof(command), "%02d:%02d:%02d", MM, SS, DD);
-
-    /* Important: actually write the updated time back to the Part II driver. */
-    return write_text_device(STOPWATCH_DEV, command);
-}
+/*
+ * This program uses the character device drivers:
+ *
+ *   /dev/IntelFPGAUP/KEY
+ *   /dev/IntelFPGAUP/SW
+ *   /dev/IntelFPGAUP/LEDR
+ *   /dev/stopwatch
+ *
+ * KEY0: toggle stopwatch run / pause.
+ * KEY1: set DD using SW value (maximum 99).
+ * KEY2: set SS using SW value (maximum 59).
+ * KEY3: set MM using SW value (maximum 59).
+ *
+ * Whenever KEY1/2/3 is pressed, the current SW value
+ * is also displayed on LEDR.
+ *
+ * Press Ctrl+C to stop the stopwatch, clear HEX and LEDR,
+ * and exit the program.
+ */
 
 int main(void)
 {
-    unsigned int keys;
-    unsigned int switches;
-    int running = 1;
-    char led_command[16];
+    int KEY_FD, SW_FD, LEDR_FD, STOPWATCH_FD;
 
+    char KEY_buffer[KEY_BYTES + 1];
+    char SW_buffer[SW_BYTES + 1];
+    char STOPWATCH_buffer[STOPWATCH_BYTES + 1];
+    char TIME_buffer[16];
+
+    int ret_val, chars_read;
+    unsigned int KEY_value, SW_value;
+    int MM, SS, DD;
+    int running = 1;
+
+    // Catch SIGINT from Ctrl+C
     signal(SIGINT, catchSIGINT);
 
-    /* DE1-SoC has HEX5-HEX0. Start Part 3 with the display enabled and the
-     * stopwatch running so that the software running flag matches the driver. */
-    if (write_text_device(STOPWATCH_DEV, "disp") != 0 ||
-        write_text_device(STOPWATCH_DEV, "run") != 0)
-        return 1;
-
-    printf("Part 3 stopwatch control\n");
-    printf("KEY0: run/pause toggle\n");
-    printf("KEY1: set DD from SW (max 99)\n");
-    printf("KEY2: set SS from SW (max 59)\n");
-    printf("KEY3: set MM from SW (max 59)\n");
-    printf("SW is copied to LEDR when KEY1, KEY2, or KEY3 is pressed.\n");
-    printf("Press Ctrl-C to quit.\n");
-
-    while (!stop_program)
+    // Open KEY character device for reading
+    if ((KEY_FD = open(KEY_DEVICE, O_RDONLY)) == -1)
     {
-        /* KEY is an edge-capture device, so poll for a new key press. */
-        if (read_hex_device(KEY_DEV_PRIMARY, KEY_DEV_FALLBACK, &keys) != 0)
+        printf("Error opening %s: %s\n",
+               KEY_DEVICE, strerror(errno));
+        return -1;
+    }
+
+    // Open SW character device for reading
+    if ((SW_FD = open(SW_DEVICE, O_RDONLY)) == -1)
+    {
+        printf("Error opening %s: %s\n",
+               SW_DEVICE, strerror(errno));
+
+        close(KEY_FD);
+        return -1;
+    }
+
+    // Open LEDR character device for writing
+    if ((LEDR_FD = open(LEDR_DEVICE, O_WRONLY)) == -1)
+    {
+        printf("Error opening %s: %s\n",
+               LEDR_DEVICE, strerror(errno));
+
+        close(KEY_FD);
+        close(SW_FD);
+        return -1;
+    }
+
+    // Open stopwatch character device for reading and writing
+    if ((STOPWATCH_FD = open(STOPWATCH_DEVICE, O_RDWR)) == -1)
+    {
+        printf("Error opening %s: %s\n", STOPWATCH_DEVICE, strerror(errno));
+
+        close(KEY_FD);
+        close(SW_FD);
+        close(LEDR_FD);
+        return -1;
+    }
+
+    // Enable HEX display and start stopwatch
+    write(STOPWATCH_FD, "disp", 4);
+    write(STOPWATCH_FD, "run", 3);
+
+    while (!stop)
+    {
+        // Read KEY edge-capture register until EOF
+        chars_read = 0;
+
+        while ((ret_val = read(KEY_FD, KEY_buffer + chars_read, KEY_BYTES - chars_read)) > 0)
+        {
+            chars_read += ret_val;
+        }
+
+        if (ret_val < 0)
+        {
+            if (errno == EINTR && stop)
+                break;
+
+            printf("Error reading KEY: %s\n",
+                   strerror(errno));
             break;
-
-        keys &= 0xF; /* DE1-SoC has KEY3 ... KEY0 */
-
-        if (keys == 0)
-        {
-            usleep(10000);
-            continue;
         }
 
-        /* KEY0 toggles the stopwatch between run and pause. */
-        if (keys & KEY0)
+        KEY_buffer[chars_read] = '\0';
+
+        KEY_value = 0;
+        sscanf(KEY_buffer, "%X", &KEY_value);
+
+        // KEY0: Toggle stopwatch between running and paused
+        if (KEY_value & 0x1)
         {
-            const char *command = running ? "stop" : "run";
+            if (running)
+            {
+                write(STOPWATCH_FD, "stop", 4);
+                running = 0;
 
-            if (write_text_device(STOPWATCH_DEV, command) != 0)
-                break;
+                printf("Stopwatch paused\n");
+            }
+            else
+            {
+                write(STOPWATCH_FD, "run", 3);
+                running = 1;
 
-            running = !running;
+                printf("Stopwatch running\n");
+            }
         }
 
-        /* Match the professor's Part III behavior: SW is read and copied to
-         * LEDR only after KEY1, KEY2, or KEY3 is pressed. */
-        if (keys & (KEY1 | KEY2 | KEY3))
+        // KEY1, KEY2, or KEY3: Read SW and use it to modify part of the stopwatch time.
+        if (KEY_value & 0xE)
         {
-            if (read_hex_device(SW_DEV_PRIMARY, SW_DEV_FALLBACK, &switches) != 0)
-                break;
+            // Read current SW value until EOF
+            chars_read = 0;
 
-            switches &= 0x3FF; /* DE1-SoC has SW9 ... SW0 */
+            while ((ret_val = read(SW_FD, SW_buffer + chars_read, SW_BYTES - chars_read)) > 0)
+            {
+                chars_read += ret_val;
+            }
 
-            snprintf(led_command, sizeof(led_command), "%03X", switches);
-            if (write_fpga_device(LEDR_DEV_PRIMARY, LEDR_DEV_FALLBACK, led_command) != 0)
-                break;
+            if (ret_val < 0)
+            {
+                if (errno == EINTR && stop)
+                    break;
 
-            if (set_stopwatch_field(keys, switches) != 0)
+                printf("Error reading SW: %s\n",
+                       strerror(errno));
                 break;
+            }
+
+            SW_buffer[chars_read] = '\0';
+
+            SW_value = 0;
+            sscanf(SW_buffer, "%X", &SW_value);
+
+            // Display current SW value on LEDR
+            write(LEDR_FD, SW_buffer, strlen(SW_buffer));
+
+            // Read current stopwatch time
+            chars_read = 0;
+
+            while ((ret_val = read(STOPWATCH_FD, STOPWATCH_buffer + chars_read, STOPWATCH_BYTES - chars_read)) > 0)
+            {
+                chars_read += ret_val;
+            }
+
+            if (ret_val < 0)
+            {
+                if (errno == EINTR && stop)
+                    break;
+
+                printf("Error reading stopwatch: %s\n",
+                       strerror(errno));
+                break;
+            }
+
+            STOPWATCH_buffer[chars_read] = '\0';
+
+            // Parse MM:SS:DD
+            if (sscanf(STOPWATCH_buffer, "%d:%d:%d", &MM, &SS, &DD) != 3)
+            {
+                printf("Invalid stopwatch time\n");
+                break;
+            }
+
+            // KEY1: Set hundredths of a second
+            if (KEY_value & 0x2)
+            {
+                DD = (SW_value > 99) ? 99 : SW_value;
+            }
+
+            // KEY2: Set seconds
+            if (KEY_value & 0x4)
+            {
+                SS = (SW_value > 59) ? 59 : SW_value;
+            }
+
+            // KEY3: Set minutes
+            if (KEY_value & 0x8)
+            {
+                MM = (SW_value > 59) ? 59 : SW_value;
+            }
+
+            // Write updated time back to stopwatch.
+            sprintf(TIME_buffer, "%02d:%02d:%02d", MM, SS, DD);
+
+            write(STOPWATCH_FD, TIME_buffer, strlen(TIME_buffer));
+
+            printf("Stopwatch set to %s\n", TIME_buffer);
         }
 
         usleep(10000);
     }
 
-    /* Clean up using the same good behavior as the teammate's version. */
-    write_text_device(STOPWATCH_DEV, "stop");
-    write_text_device(STOPWATCH_DEV, "nodisp");
-    write_fpga_device(LEDR_DEV_PRIMARY, LEDR_DEV_FALLBACK, "000");
+    // Ctrl+C cleanup
+    // Stop stopwatch
+    write(STOPWATCH_FD, "stop", 4);
 
-    printf("\nProgram exited. Stopwatch stopped; HEX and LEDR cleared.\n");
+    // Turn off HEX display
+    write(STOPWATCH_FD, "nodisp", 6);
+
+    // Clear LEDR
+    write(LEDR_FD, "000", 3);
+
+    // Close all device files
+    close(KEY_FD);
+    close(SW_FD);
+    close(LEDR_FD);
+    close(STOPWATCH_FD);
+
+    printf("\nProgram exited.\n");
+
     return 0;
 }

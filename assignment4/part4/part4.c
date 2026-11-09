@@ -8,203 +8,77 @@
 #include <time.h>
 #include <sys/select.h>
 
-#define STOPWATCH_DEV "/dev/stopwatch"
+#define KEY_DEVICE "/dev/IntelFPGAUP/KEY"
+#define SW_DEVICE "/dev/IntelFPGAUP/SW"
+#define LEDR_DEVICE "/dev/IntelFPGAUP/LEDR"
+#define STOPWATCH_DEVICE "/dev/stopwatch"
 
-#define KEY_DEV_PRIMARY "/dev/IntelFPGAUP/KEY"
-#define KEY_DEV_FALLBACK "/dev/KEY"
-
-#define SW_DEV_PRIMARY "/dev/IntelFPGAUP/SW"
-#define SW_DEV_FALLBACK "/dev/SW"
-
-#define LEDR_DEV_PRIMARY "/dev/IntelFPGAUP/LEDR"
-#define LEDR_DEV_FALLBACK "/dev/LEDR"
+#define KEY_BYTES 2
+#define SW_BYTES 4
+#define STOPWATCH_BYTES 9
 
 #define KEY0 0x1
 #define KEY1 0x2
 #define KEY2 0x4
 #define KEY3 0x8
 
-/*
- * The lab manual requires a default stopwatch time but does not prescribe
- * a particular value. This implementation uses 10 seconds.
- */
+// default stopwatch time: 10 seconds
 #define DEFAULT_MM 0
 #define DEFAULT_SS 10
 #define DEFAULT_DD 0
 
-static volatile sig_atomic_t stop_program = 0;
+volatile sig_atomic_t stop;
 
-static void catchSIGINT(int signum)
+void catchSIGINT(int signum)
 {
     (void)signum;
-    stop_program = 1;
+    stop = 1;
 }
 
-static int open_input_device(const char *primary, const char *fallback)
+static int read_stopwatch(int STOPWATCH_FD, int *MM, int *SS, int *DD)
 {
-    int fd = open(primary, O_RDONLY);
+    char STOPWATCH_buffer[STOPWATCH_BYTES + 1];
+    int chars_read = 0;
+    int ret_val;
 
-    if (fd == -1 && errno == ENOENT)
-        fd = open(fallback, O_RDONLY);
-
-    if (fd == -1)
-        fprintf(stderr, "Error opening %s or %s: %s\n",
-                primary, fallback, strerror(errno));
-
-    return fd;
-}
-
-static int read_hex_device(const char *primary, const char *fallback,
-                           unsigned int *value)
-{
-    int fd;
-    ssize_t n;
-    char buffer[32];
-    char *endptr;
-    unsigned long parsed;
-
-    fd = open_input_device(primary, fallback);
-    if (fd == -1)
-        return -1;
-
-    n = read(fd, buffer, sizeof(buffer) - 1);
-    close(fd);
-
-    if (n < 0)
+    while ((ret_val = read(STOPWATCH_FD, STOPWATCH_buffer + chars_read, STOPWATCH_BYTES - chars_read)) > 0)
     {
-        fprintf(stderr, "Error reading %s/%s: %s\n",
-                primary, fallback, strerror(errno));
+        chars_read += ret_val;
+    }
+
+    if (ret_val < 0)
+    {
+        if (errno == EINTR && stop)
+            return -1;
+
+        printf("Error reading stopwatch: %s\n", strerror(errno));
         return -1;
     }
 
-    if (n == 0)
+    STOPWATCH_buffer[chars_read] = '\0';
+
+    if (sscanf(STOPWATCH_buffer, "%d:%d:%d", MM, SS, DD) != 3)
     {
-        *value = 0;
-        return 0;
-    }
-
-    buffer[n] = '\0';
-
-    errno = 0;
-    parsed = strtoul(buffer, &endptr, 16);
-    if (errno != 0 || endptr == buffer)
-    {
-        fprintf(stderr, "Invalid value read from device: %s\n", buffer);
-        return -1;
-    }
-
-    *value = (unsigned int)parsed;
-    return 0;
-}
-
-static int write_text_device(const char *device, const char *text)
-{
-    int fd;
-    ssize_t n;
-    size_t length = strlen(text);
-
-    fd = open(device, O_WRONLY);
-    if (fd == -1)
-    {
-        fprintf(stderr, "Error opening %s: %s\n", device, strerror(errno));
-        return -1;
-    }
-
-    n = write(fd, text, length);
-    close(fd);
-
-    if (n != (ssize_t)length)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error writing %s: %s\n",
-                    device, strerror(errno));
-        else
-            fprintf(stderr, "Short write to %s\n", device);
+        printf("Invalid stopwatch time\n");
         return -1;
     }
 
     return 0;
 }
 
-static int write_fpga_device(const char *primary, const char *fallback,
-                             const char *text)
+static int write_stopwatch_time(int STOPWATCH_FD, int MM, int SS, int DD)
 {
-    int fd;
-    ssize_t n;
-    size_t length = strlen(text);
+    char TIME_buffer[16];
 
-    fd = open(primary, O_WRONLY);
+    sprintf(TIME_buffer, "%02d:%02d:%02d", MM, SS, DD);
 
-    if (fd == -1 && errno == ENOENT)
-        fd = open(fallback, O_WRONLY);
-
-    if (fd == -1)
+    if (write(STOPWATCH_FD, TIME_buffer, strlen(TIME_buffer)) < 0)
     {
-        fprintf(stderr, "Error opening %s or %s: %s\n",
-                primary, fallback, strerror(errno));
-        return -1;
-    }
-
-    n = write(fd, text, length);
-    close(fd);
-
-    if (n != (ssize_t)length)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error writing FPGA device: %s\n",
-                    strerror(errno));
-        else
-            fprintf(stderr, "Short write to FPGA device\n");
+        printf("Error writing stopwatch: %s\n", strerror(errno));
         return -1;
     }
 
     return 0;
-}
-
-static int read_stopwatch(int *MM, int *SS, int *DD)
-{
-    int fd;
-    ssize_t n;
-    char buffer[32];
-
-    fd = open(STOPWATCH_DEV, O_RDONLY);
-    if (fd == -1)
-    {
-        fprintf(stderr, "Error opening %s: %s\n",
-                STOPWATCH_DEV, strerror(errno));
-        return -1;
-    }
-
-    n = read(fd, buffer, sizeof(buffer) - 1);
-    close(fd);
-
-    if (n <= 0)
-    {
-        if (n < 0)
-            fprintf(stderr, "Error reading %s: %s\n",
-                    STOPWATCH_DEV, strerror(errno));
-        return -1;
-    }
-
-    buffer[n] = '\0';
-
-    if (sscanf(buffer, "%d:%d:%d", MM, SS, DD) != 3)
-    {
-        fprintf(stderr, "Invalid stopwatch value: %s\n", buffer);
-        return -1;
-    }
-
-    return 0;
-}
-
-static int write_stopwatch_time(int MM, int SS, int DD)
-{
-    char command[16];
-
-    snprintf(command, sizeof(command),
-             "%02d:%02d:%02d", MM, SS, DD);
-
-    return write_text_device(STOPWATCH_DEV, command);
 }
 
 static int hundredths_from_time(int MM, int SS, int DD)
@@ -224,11 +98,7 @@ static void print_remaining_time(int remaining_hundredths)
     SS = remaining_hundredths / 100;
     DD = remaining_hundredths % 100;
 
-    /*
-     * Match the professor's sample:
-     * move the cursor to a fixed column, print the time in red,
-     * then reset the terminal color.
-     */
+    // print the time in red, then reset the terminal color
     printf("\033[1A\033[20G\033[31m%02d:%02d:%02d\033[0m\n", MM, SS, DD);
 }
 
@@ -236,18 +106,12 @@ static void make_question(int questions_answered, int *a, int *b)
 {
     int maximum;
 
-    /*
-     * Increase difficulty as the game progresses:
-     *   questions 1-5   : one-digit operands
-     *   questions 6-10  : two-digit operands
-     *   questions 11+   : three-digit operands
-     */
     if (questions_answered < 5)
-        maximum = 9;
+        maximum = 9; // one-digit operands
     else if (questions_answered < 10)
-        maximum = 99;
+        maximum = 99; // two-digit operands
     else
-        maximum = 999;
+        maximum = 999; // three-digit operands
 
     *a = rand() % (maximum + 1);
     *b = rand() % (maximum + 1);
@@ -255,23 +119,21 @@ static void make_question(int questions_answered, int *a, int *b)
 
 /*
  * Wait for an answer while periodically checking the hardware stopwatch.
- *
  * Return:
  *   1 = a complete line was received
  *   0 = stopwatch expired
  *  -1 = error / interrupted
  */
-static int wait_for_answer(char *buffer, size_t size,
-                           int *remaining_hundredths)
+static int wait_for_answer(int STOPWATCH_FD, char *buffer, size_t size, int *remaining_hundredths)
 {
-    while (!stop_program)
+    while (!stop)
     {
         int MM, SS, DD;
         fd_set readfds;
         struct timeval timeout;
         int ready;
 
-        if (read_stopwatch(&MM, &SS, &DD) != 0)
+        if (read_stopwatch(STOPWATCH_FD, &MM, &SS, &DD) != 0)
             return -1;
 
         *remaining_hundredths = hundredths_from_time(MM, SS, DD);
@@ -283,7 +145,7 @@ static int wait_for_answer(char *buffer, size_t size,
         FD_SET(STDIN_FILENO, &readfds);
 
         timeout.tv_sec = 0;
-        timeout.tv_usec = 10000; /* 10 ms */
+        timeout.tv_usec = 10000; // 10 ms
 
         ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout);
 
@@ -291,7 +153,7 @@ static int wait_for_answer(char *buffer, size_t size,
         {
             if (errno == EINTR)
             {
-                if (stop_program)
+                if (stop)
                     return -1;
                 continue;
             }
@@ -305,11 +167,8 @@ static int wait_for_answer(char *buffer, size_t size,
             if (fgets(buffer, (int)size, stdin) == NULL)
                 return -1;
 
-            /*
-             * Re-read the stopwatch after the user presses Enter so an answer
-             * entered after expiration is not accepted.
-             */
-            if (read_stopwatch(&MM, &SS, &DD) != 0)
+            // Re-read the stopwatch after the user presses Enter so an answer entered after expiration is not accepted.
+            if (read_stopwatch(STOPWATCH_FD, &MM, &SS, &DD) != 0)
                 return -1;
 
             *remaining_hundredths = hundredths_from_time(MM, SS, DD);
@@ -320,22 +179,26 @@ static int wait_for_answer(char *buffer, size_t size,
             return 1;
         }
     }
-
     return -1;
 }
 
-static void cleanup_devices(void)
+static void cleanup_devices(int LEDR_FD, int STOPWATCH_FD)
 {
-    write_text_device(STOPWATCH_DEV, "stop");
-    write_text_device(STOPWATCH_DEV, "nodisp");
-    write_fpga_device(LEDR_DEV_PRIMARY, LEDR_DEV_FALLBACK, "000");
+    write(STOPWATCH_FD, "stop", 4);
+    write(STOPWATCH_FD, "nodisp", 6);
+    write(LEDR_FD, "000", 3);
 }
 
 int main(void)
 {
-    unsigned int keys;
-    unsigned int switches;
-    char led_command[16];
+    int KEY_FD, SW_FD, LEDR_FD, STOPWATCH_FD;
+
+    char KEY_buffer[KEY_BYTES + 1];
+    char SW_buffer[SW_BYTES + 1];
+    char LEDR_buffer[16];
+
+    int ret_val, chars_read;
+    unsigned int KEY_value, SW_value;
 
     int configured_MM = DEFAULT_MM;
     int configured_SS = DEFAULT_SS;
@@ -348,101 +211,176 @@ int main(void)
     signal(SIGINT, catchSIGINT);
     srand((unsigned int)time(NULL));
 
-    /*
-     * Setup phase:
-     * show the default time, keep the stopwatch paused while the user edits
-     * MM/SS/DD, and wait for KEY0 to start the game.
-     */
-    if (write_text_device(STOPWATCH_DEV, "disp") != 0 ||
-        write_text_device(STOPWATCH_DEV, "stop") != 0 ||
-        write_stopwatch_time(configured_MM,
+    // Open KEY and SW character device drivers for reading
+    if ((KEY_FD = open(KEY_DEVICE, O_RDONLY)) == -1)
+    {
+        printf("Error opening %s: %s\n", KEY_DEVICE, strerror(errno));
+        return -1;
+    }
+
+    if ((SW_FD = open(SW_DEVICE, O_RDONLY)) == -1)
+    {
+        printf("Error opening %s: %s\n", SW_DEVICE, strerror(errno));
+        close(KEY_FD);
+        return -1;
+    }
+
+    // Open LEDR character device driver for writing
+    if ((LEDR_FD = open(LEDR_DEVICE, O_WRONLY)) == -1)
+    {
+        printf("Error opening %s: %s\n", LEDR_DEVICE, strerror(errno));
+        close(KEY_FD);
+        close(SW_FD);
+        return -1;
+    }
+
+    // Open stopwatch character device driver for reading and writing
+    if ((STOPWATCH_FD = open(STOPWATCH_DEVICE, O_RDWR)) == -1)
+    {
+        printf("Error opening %s: %s\n", STOPWATCH_DEVICE, strerror(errno));
+        close(KEY_FD);
+        close(SW_FD);
+        close(LEDR_FD);
+        return -1;
+    }
+
+    // Setup phase:
+    // show the default time, keep the stopwatch paused while the user edits
+    // MM/SS/DD, and wait for KEY0 to start the game
+    if (write(STOPWATCH_FD, "disp", 4) < 0 ||
+        write(STOPWATCH_FD, "stop", 4) < 0 ||
+        write_stopwatch_time(STOPWATCH_FD,
+                             configured_MM,
                              configured_SS,
                              configured_DD) != 0)
     {
-        cleanup_devices();
+        cleanup_devices(LEDR_FD, STOPWATCH_FD);
+        close(KEY_FD);
+        close(SW_FD);
+        close(LEDR_FD);
+        close(STOPWATCH_FD);
         return 1;
     }
 
     printf("Set stopwatch if desired. Press KEY0 to start\n");
 
-    while (!stop_program)
+    while (!stop)
     {
-        if (read_hex_device(KEY_DEV_PRIMARY, KEY_DEV_FALLBACK, &keys) != 0)
+        // Read KEY edge-capture register until EOF
+        chars_read = 0;
+        while ((ret_val = read(KEY_FD,
+                               KEY_buffer + chars_read,
+                               KEY_BYTES - chars_read)) > 0)
         {
-            cleanup_devices();
+            chars_read += ret_val;
+        }
+
+        if (ret_val < 0)
+        {
+            if (errno == EINTR && stop)
+                break;
+
+            printf("Error reading KEY: %s\n", strerror(errno));
+            cleanup_devices(LEDR_FD, STOPWATCH_FD);
+            close(KEY_FD);
+            close(SW_FD);
+            close(LEDR_FD);
+            close(STOPWATCH_FD);
             return 1;
         }
 
-        keys &= 0xF;
+        KEY_buffer[chars_read] = '\0';
 
-        if (keys == 0)
+        KEY_value = 0;
+        sscanf(KEY_buffer, "%X", &KEY_value);
+        KEY_value &= 0xF;
+
+        if (KEY_value == 0)
         {
             usleep(10000);
             continue;
         }
 
-        if (keys & KEY0)
+        // KEY0: start the game
+        if (KEY_value & KEY0)
             break;
 
-        if (keys & (KEY1 | KEY2 | KEY3))
+        // KEY1, KEY2, KEY3: set stopwatch time
+        if (KEY_value & (KEY1 | KEY2 | KEY3))
         {
-            if (read_hex_device(SW_DEV_PRIMARY, SW_DEV_FALLBACK,
-                                &switches) != 0)
+            // Read current SW value until EOF
+            chars_read = 0;
+            while ((ret_val = read(SW_FD,
+                                   SW_buffer + chars_read,
+                                   SW_BYTES - chars_read)) > 0)
             {
-                cleanup_devices();
+                chars_read += ret_val;
+            }
+
+            if (ret_val < 0)
+            {
+                if (errno == EINTR && stop)
+                    break;
+
+                printf("Error reading SW: %s\n", strerror(errno));
+                cleanup_devices(LEDR_FD, STOPWATCH_FD);
+                close(KEY_FD);
+                close(SW_FD);
+                close(LEDR_FD);
+                close(STOPWATCH_FD);
                 return 1;
             }
 
-            switches &= 0x3FF;
+            SW_buffer[chars_read] = '\0';
 
-            snprintf(led_command, sizeof(led_command),
-                     "%03X", switches);
+            SW_value = 0;
+            sscanf(SW_buffer, "%X", &SW_value);
+            SW_value &= 0x3FF;
 
-            if (write_fpga_device(LEDR_DEV_PRIMARY,
-                                  LEDR_DEV_FALLBACK,
-                                  led_command) != 0)
+            // Display current SW value on LEDR
+            sprintf(LEDR_buffer, "%03X", SW_value);
+            write(LEDR_FD, LEDR_buffer, strlen(LEDR_buffer));
+
+            // KEY1: set hundredths of a second
+            if (KEY_value & KEY1)
+                configured_DD = (SW_value > 99) ? 99 : (int)SW_value;
+
+            // KEY2: set seconds
+            if (KEY_value & KEY2)
+                configured_SS = (SW_value > 59) ? 59 : (int)SW_value;
+
+            // KEY3: set minutes
+            if (KEY_value & KEY3)
+                configured_MM = (SW_value > 59) ? 59 : (int)SW_value;
+
+            if (write_stopwatch_time(STOPWATCH_FD, configured_MM, configured_SS, configured_DD) != 0)
             {
-                cleanup_devices();
-                return 1;
-            }
-
-            if (keys & KEY1)
-                configured_DD = (switches > 99) ? 99 : (int)switches;
-
-            if (keys & KEY2)
-                configured_SS = (switches > 59) ? 59 : (int)switches;
-
-            if (keys & KEY3)
-                configured_MM = (switches > 59) ? 59 : (int)switches;
-
-            if (write_stopwatch_time(configured_MM,
-                                     configured_SS,
-                                     configured_DD) != 0)
-            {
-                cleanup_devices();
+                cleanup_devices(LEDR_FD, STOPWATCH_FD);
+                close(KEY_FD);
+                close(SW_FD);
+                close(LEDR_FD);
+                close(STOPWATCH_FD);
                 return 1;
             }
         }
-
         usleep(10000);
     }
 
-    if (stop_program)
+    if (stop)
     {
-        cleanup_devices();
+        cleanup_devices(LEDR_FD, STOPWATCH_FD);
+        close(KEY_FD);
+        close(SW_FD);
+        close(LEDR_FD);
+        close(STOPWATCH_FD);
         return 0;
     }
 
     configured_hundredths =
-        hundredths_from_time(configured_MM,
-                             configured_SS,
-                             configured_DD);
+        hundredths_from_time(configured_MM, configured_SS, configured_DD);
 
-    /*
-     * A zero configured time cannot provide a question interval. It simply
-     * expires immediately, which is consistent with the stopwatch behavior.
-     */
-    while (!stop_program)
+    // A zero configured time cannot provide a question interval. expires immediately
+    while (!stop)
     {
         int a, b;
         int correct_answer;
@@ -453,66 +391,67 @@ int main(void)
         make_question(questions_answered, &a, &b);
         correct_answer = a + b;
 
-        if (write_text_device(STOPWATCH_DEV, "stop") != 0 ||
-            write_stopwatch_time(configured_MM,
+        if (write(STOPWATCH_FD, "stop", 4) < 0 ||
+            write_stopwatch_time(STOPWATCH_FD,
+                                 configured_MM,
                                  configured_SS,
                                  configured_DD) != 0 ||
-            write_text_device(STOPWATCH_DEV, "run") != 0)
+            write(STOPWATCH_FD, "run", 3) < 0)
         {
-            cleanup_devices();
+            cleanup_devices(LEDR_FD, STOPWATCH_FD);
+            close(KEY_FD);
+            close(SW_FD);
+            close(LEDR_FD);
+            close(STOPWATCH_FD);
             return 1;
         }
 
         printf("%d + %d = ", a, b);
         fflush(stdout);
 
-        while (!question_finished && !stop_program)
+        while (!question_finished && !stop)
         {
             int status;
             char *endptr;
             long answer;
 
-            status = wait_for_answer(input, sizeof(input),
-                                     &remaining_hundredths);
+            status = wait_for_answer(STOPWATCH_FD, input, sizeof(input), &remaining_hundredths);
 
             if (status < 0)
             {
-                if (!stop_program)
+                if (!stop)
                     fprintf(stderr, "\nError while waiting for answer.\n");
-                cleanup_devices();
-                return stop_program ? 0 : 1;
+
+                cleanup_devices(LEDR_FD, STOPWATCH_FD);
+                close(KEY_FD);
+                close(SW_FD);
+                close(LEDR_FD);
+                close(STOPWATCH_FD);
+                return stop ? 0 : 1;
             }
 
             if (status == 0)
             {
-                double average_seconds =
-                    (questions_answered > 0)
-                        ? ((double)total_answer_hundredths /
-                           (double)questions_answered / 100.0)
-                        : 0.0;
+                double average_seconds = (questions_answered > 0) ? ((double)total_answer_hundredths / (double)questions_answered / 100.0) : 0.0;
 
-                write_text_device(STOPWATCH_DEV, "stop");
+                write(STOPWATCH_FD, "stop", 4);
 
-                printf("\nTime expired! You answered %d question%s",
-                       questions_answered,
-                       (questions_answered == 1) ? "" : "s");
+                printf("\nTime expired! You answered %d question%s", questions_answered, (questions_answered == 1) ? "" : "s");
 
                 if (questions_answered > 0)
-                    printf(", in an average of %.2f seconds.\n",
-                           average_seconds);
+                    printf(", in an average of %.2f seconds.\n", average_seconds);
                 else
                     printf(".\n");
 
-                cleanup_devices();
+                cleanup_devices(LEDR_FD, STOPWATCH_FD);
+                close(KEY_FD);
+                close(SW_FD);
+                close(LEDR_FD);
+                close(STOPWATCH_FD);
                 return 0;
             }
 
-            /*
-             * Match the professor's sample output: after every submitted
-             * answer, print the stopwatch value that remained when Enter
-             * was pressed. This happens for both correct and incorrect
-             * answers.
-             */
+            // print the stopwatch value that remained when Enter was pressed
             print_remaining_time(remaining_hundredths);
 
             errno = 0;
@@ -521,19 +460,14 @@ int main(void)
             while (*endptr == ' ' || *endptr == '\t')
                 endptr++;
 
-            if (errno == 0 &&
-                endptr != input &&
-                (*endptr == '\n' || *endptr == '\0') &&
-                answer == correct_answer)
+            if (errno == 0 && endptr != input && (*endptr == '\n' || *endptr == '\0') && answer == correct_answer)
             {
-
-                int elapsed_hundredths =
-                    configured_hundredths - remaining_hundredths;
+                int elapsed_hundredths = configured_hundredths - remaining_hundredths;
 
                 if (elapsed_hundredths < 0)
                     elapsed_hundredths = 0;
 
-                write_text_device(STOPWATCH_DEV, "stop");
+                write(STOPWATCH_FD, "stop", 4);
 
                 total_answer_hundredths += elapsed_hundredths;
                 questions_answered++;
@@ -547,6 +481,12 @@ int main(void)
         }
     }
 
-    cleanup_devices();
+    cleanup_devices(LEDR_FD, STOPWATCH_FD);
+
+    close(KEY_FD);
+    close(SW_FD);
+    close(LEDR_FD);
+    close(STOPWATCH_FD);
+
     return 0;
 }
