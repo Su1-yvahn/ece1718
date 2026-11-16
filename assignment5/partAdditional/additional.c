@@ -14,11 +14,11 @@
 #define DELAY_STEP_NS 25000000L
 #define MIN_DELAY_NS 50000000L
 #define MAX_DELAY_NS 500000000L
-#define SW_RECTANGLE (1u << 0) // left shift unsigned integer 1 by 0 poosition
-#define SW_TRIANGLE (1u << 1)
-#define SW_SQUARE (1u << 2)
-#define SW_MIXED (1u << 3)
-#define SW_HIDE (1u << 9)
+#define SW_RECTANGLE (1u << 0) // left shift unsigned integer 1 by 0 poosition SW0
+#define SW_TRIANGLE (1u << 1)  // SW1
+#define SW_SQUARE (1u << 2)    // SW2
+#define SW_MIXED (1u << 3)     // SW3
+#define SW_HIDE (1u << 9)      // SW9
 
 enum shape_type
 {
