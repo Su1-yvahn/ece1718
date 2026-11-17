@@ -1,0 +1,79 @@
+To facilitate accurate marking, your submitted solution must use this template.
+
+
+To complete each part of the exercise, add your own code to the following files:
+part1: nothing to do, this solution is provided (part1.c)
+part2: nothing to do, this solution is provided (part2.c)
+part3: part3.c
+part4: part4.c
+part5: part5.c
+additional part (optional): your own .c file(s) in the partAdditional folder
+
+Note: part 5 requires reading key and switch values.  You may choose to use the built-in 
+drivers (located in /home/root/Linux_Libraries/drivers/) or the KEY_SW driver you wrote for 
+lab exercise 4 (please include your driver with your submission, and note that you will need 
+to modify the runall.sh script to load your driver), or you may choose to use memory mapped IO.
+
+
+Please test your solution using the provided runall.sh script:
+part1: ./runall.sh 1
+part2: ./runall.sh 2
+part3: ./runall.sh 3
+part4: ./runall.sh 4
+part5: ./runall.sh 5
+additional part: ./runall.sh additional
+
+
+ADDITIONAL PART (optional, 1 mark)
+Take your part 3, 4 or 5 program and add something new to it.
+The partAdditional folder starts empty. This is where your additional part goes.
+
+1. Put your .c file(s) in partAdditional. Any file name is fine.
+   Start from a copy of your part 3, 4 or 5 code and change it.
+
+2. Keep only your changed version in this folder.
+   Do not also put your original part 3, 4 or 5 code in here.
+   Only one program in this folder gets run.
+
+3. You do not need to write a Makefile. The one in the folder finds your files by itself.
+   A file with main() is built and run as a program.
+   A file with module_init is built and loaded as a kernel module (for example your own KEY/SW driver).
+   Use one program, one kernel module, or one of each.
+
+4. Header files go in the include folder, not in partAdditional.
+   Include them the same way your other parts do:
+       #include "defines.h"
+
+5. Test it with ./runall.sh additional
+   This loads your kernel module first (if you have one).
+   Then it loads the built in KEY and SW drivers and runs your program.
+
+6. Fill in the ADDITIONAL PART section at the bottom of this README.
+   I'll use it to find and test your work, so be specific.
+
+
+To clean all directories and remove all drivers: ./runall clean
+
+
+To submit your solution: ./runall.sh submit 
+The script generates a .tar.bz2 archive. Please upload this
+archive to quercus (only one team member needs to do this).
+
+
+The script may generate errors, for example:
+ERROR: Removing 'timer': No such file or directory
+These errors can be ignored.
+
+
+If you would like to clarify your interpretation of the exercise instructions 
+or provide any additional information to the grader, PLEASE TYPE IT HERE:
+
+
+
+ADDITIONAL PART (leave blank if you did not do one)
+Which part it is based on (3, 4 or 5):
+
+What I added:
+
+How to use it (which KEYs and switches do what, what shows on the terminal):
+
