@@ -103,7 +103,6 @@ static int __init start_video(void)
     }
 
     // Restore the on-chip buffer as the front buffer if a prior run swapped it
-    // Ensures that FPGA on-chip memory is the front buffer when the driver starts
     if (*pixel_ctrl_ptr != FPGA_ONCHIP_BASE)
     {
         *(pixel_ctrl_ptr + 1) = FPGA_ONCHIP_BASE;

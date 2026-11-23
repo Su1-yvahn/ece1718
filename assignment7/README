@@ -1,0 +1,79 @@
+To facilitate accurate marking, your submitted solution must use this template.
+
+To complete each part of the exercise, add your own code to the following files:
+ADXL345.c: the Part 1 solution functions are provided (used by all parts). You can add your own functions here.
+part1: nothing to do, this solution is provided (part1.c)
+part2: nothing to do, this solution is provided (part2.c, accel_kernel_module.c)
+part3: part3.c, accel_kernel_module.c
+part4: part4.c, accel_kernel_module.c
+additional part (optional): your own .c file(s) in the partAdditional folder
+
+
+Please test your solution using the provided runall.sh script:
+part1: ./runall.sh 1
+part2: ./runall.sh 2
+part3: ./runall.sh 3
+part4: ./runall.sh 4
+additional part: ./runall.sh additional
+
+
+ADDITIONAL PART (optional, 1 mark)
+Take your part 3 or part 4 and add something new to it.
+The partAdditional folder starts empty. This is where your additional part goes.
+
+1. Copy accel_kernel_module.c and your program (part3.c or part4.c) from the part you
+   started from into partAdditional. Then change them. Any program file name is fine,
+   but keep the driver file named accel_kernel_module.c.
+
+2. Copy accel_kernel_module.c even if you did not change it.
+   ./runall.sh additional only loads the accel driver that is in this folder.
+
+3. Keep only your changed version in this folder.
+   Do not also put your original part code in here.
+
+4. You do not need to write a Makefile. The one in the folder builds your files by itself.
+   accel_kernel_module.c is built with ../ADXL345.c into the accel driver (/dev/accel).
+   Your program is built with ../accel_wrappers.c, the same way parts 3 and 4 are.
+   If you need new ADXL345 functions, add them to ../ADXL345.c. Do not change the ones
+   your other parts use.
+
+5. Header files go in the include folder, not in partAdditional.
+   Include them the same way your other parts do:
+       #include "../include/ADXL345.h"
+
+6. Test it with ./runall.sh additional
+   This loads your accel driver, then runs your program.
+
+7. Fill in the ADDITIONAL PART section at the bottom of this README.
+   I'll use it to find and test your work, so be specific.
+
+To clean all directories and remove all drivers: ./runall clean
+
+
+To submit your solution: ./runall.sh submit 
+The script generates a .tar.bz2 archive. Please upload this
+archive to quercus (only one team member needs to do this).
+
+
+The script may generate errors, for example:
+ERROR: Removing 'timer': No such file or directory
+These errors can be ignored.
+
+
+If you would like to clarify your interpretation of the exercise instructions 
+or provide any additional information to the grader, PLEASE TYPE IT HERE:
+
+
+
+ADDITIONAL PART (leave blank if you did not do one)
+
+Which part it is based on (3 or 4):
+Part 4.
+
+What I added:
+I added an ASCII tilt-controlled target game. The moving green bubble (o) is the player, and a red X is the target. The score increases by one whenever the bubble reaches the target, and a new target appears at another location. I kept the X, Y, and Z acceleration readings at the top of the terminal and used the Part 4 tap detection to reset the game.
+Also, it is worth to mention that the bubble only needs to be within two columns and one row of the target to score. Targets are generated within a reasonably reachable range.
+
+How to use it (what to do with the board, what shows on the terminal):
+Run ./runall.sh additional. Keep the DE1-SoC board flat at first, then tilt it in the X and Y directions to move the green o toward the red X. When the bubble reaches the target, the score increases and a new X appears. The top of the terminal shows the acceleration values, current score, and instructions. Single-tap the board to reset the score to zero and generate a new target. Press Ctrl+C to quit.
+

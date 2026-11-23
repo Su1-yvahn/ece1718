@@ -91,7 +91,6 @@ static int __init start_video(void)
     pixel_ctrl_ptr = (unsigned int *)(LW_virtual + PIXEL_BUF_CTRL_BASE);
     get_screen_specs(pixel_ctrl_ptr); // determine X, Y screen size
 
-    /* Restore the FPGA on-chip buffer after Parts 4/5 used double buffering. */
     *(pixel_ctrl_ptr + 1) = FPGA_ONCHIP_BASE; // select on-chip buffer as next front
     wait_for_vsync();                         // make the controller display it
     *(pixel_ctrl_ptr + 1) = FPGA_ONCHIP_BASE; // single buffering: same back buffer
@@ -198,7 +197,7 @@ void draw_line(int x0, int y0, int x1, int y1, short int color)
     }
 }
 
-/* Synchronize to the next VGA frame without using a second buffer. */
+// Synchronize to the next VGA frame without using a second buffer
 void wait_for_vsync(void)
 {
     *pixel_ctrl_ptr = 1; // request pixel buffer swap
